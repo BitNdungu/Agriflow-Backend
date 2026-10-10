@@ -29,6 +29,17 @@ def valid_farmer_payload():
     }
 
 
+def register_test_farmer(client):
+    response = client.post(
+        "/api/farmers",
+        json=valid_farmer_payload(),
+    )
+
+    assert response.status_code == 201
+
+    return response.get_json()["farmer"]
+
+
 def test_root_endpoint(client):
     response = client.get("/")
 
@@ -49,7 +60,7 @@ def test_health_endpoint(client):
     assert response.get_json() == {
         "status": "ok",
         "service": "muranga-agriflow-api",
-        "version": "0.2.0",
+        "version": "0.3.0",
     }
 
 
@@ -72,10 +83,7 @@ def test_create_farmer_profile(client):
     assert farmer["id"] > 0
     assert farmer["full_name"] == "Jane Wanjiku"
     assert farmer["phone"] == "0712345678"
-
-    # The server, not the submitted payload, determines the county.
     assert farmer["county"] == "Murang'a County"
-
     assert farmer["subcounty"] == "Kandara"
     assert farmer["ward"] == "Muruka"
     assert farmer["farm_size_acres"] == 2.5
@@ -88,8 +96,6 @@ def test_created_farmer_is_persisted(client):
         "/api/farmers",
         json=valid_farmer_payload(),
     )
-
-    assert response.status_code == 201
 
     farmer_id = response.get_json()["farmer"]["id"]
 
@@ -157,6 +163,114 @@ def test_nonpositive_farm_size_is_rejected(client):
 def test_non_json_request_is_rejected(client):
     response = client.post(
         "/api/farmers",
+        data="not json",
+        content_type="text/plain",
+    )
+
+    assert response.status_code == 415
+
+
+def test_get_farmer_profile(client):
+    created = register_test_farmer(client)
+
+    response = client.get(
+        f"/api/farmers/{created['id']}"
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["farmer"] == created
+
+
+def test_get_missing_farmer_returns_404(client):
+    response = client.get("/api/farmers/9999")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "Farmer not found."
+
+
+def test_update_farmer_profile(client):
+    created = register_test_farmer(client)
+
+    payload = {
+        "full_name": "Jane Wanjiku Kamau",
+        "phone": "0711111111",
+        "subcounty": "Kiharu",
+        "ward": "Township",
+        "farm_size_acres": 3.75,
+        "main_enterprise": "Coffee",
+    }
+
+    response = client.put(
+        f"/api/farmers/{created['id']}",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+    updated = response.get_json()["farmer"]
+
+    assert updated["id"] == created["id"]
+    assert updated["created_at"] == created["created_at"]
+    assert updated["full_name"] == "Jane Wanjiku Kamau"
+    assert updated["phone"] == "0711111111"
+    assert updated["subcounty"] == "Kiharu"
+    assert updated["ward"] == "Township"
+    assert updated["farm_size_acres"] == 3.75
+    assert updated["main_enterprise"] == "Coffee"
+
+    # Verify the updated values can be retrieved again.
+    fetched = client.get(
+        f"/api/farmers/{created['id']}"
+    )
+
+    assert fetched.status_code == 200
+    assert fetched.get_json()["farmer"] == updated
+
+
+def test_update_missing_farmer_returns_404(client):
+    response = client.put(
+        "/api/farmers/9999",
+        json=valid_farmer_payload(),
+    )
+
+    assert response.status_code == 404
+
+
+def test_update_rejects_invalid_subcounty(client):
+    created = register_test_farmer(client)
+
+    payload = valid_farmer_payload()
+    payload["subcounty"] = "Nairobi"
+
+    response = client.put(
+        f"/api/farmers/{created['id']}",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert "subcounty" in response.get_json()["fields"]
+
+
+def test_update_rejects_missing_required_fields(client):
+    created = register_test_farmer(client)
+
+    payload = valid_farmer_payload()
+    del payload["full_name"]
+
+    response = client.put(
+        f"/api/farmers/{created['id']}",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert "full_name" in response.get_json()["fields"]
+
+
+def test_update_rejects_non_json_request(client):
+    created = register_test_farmer(client)
+
+    response = client.put(
+        f"/api/farmers/{created['id']}",
         data="not json",
         content_type="text/plain",
     )
