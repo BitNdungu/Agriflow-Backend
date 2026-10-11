@@ -1,6 +1,7 @@
 
 import math
 import re
+from datetime import datetime
 
 
 VALID_SUBCOUNTIES = {
@@ -142,4 +143,136 @@ def validate_farmer_payload(payload):
         "ward": ward,
         "farm_size_acres": farm_size_acres,
         "main_enterprise": enterprise,
+    }, errors
+
+
+def validate_crop_payload(payload):
+    """Validate and normalize a crop record."""
+    errors = {}
+
+    # Crop name
+    raw_name = payload.get("name")
+
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        errors["name"] = "A crop name is required."
+        name = ""
+    else:
+        name = raw_name.strip()
+
+        if len(name) > 120:
+            errors["name"] = (
+                "Crop name must be at most 120 characters."
+            )
+
+    # Acreage is required and must be positive and finite.
+    raw_acreage = payload.get("acreage")
+    acreage = None
+
+    if isinstance(raw_acreage, bool) or raw_acreage is None:
+        errors["acreage"] = "A positive acreage is required."
+    else:
+        try:
+            acreage = float(raw_acreage)
+
+            if not math.isfinite(acreage) or acreage <= 0:
+                errors["acreage"] = (
+                    "Acreage must be a positive finite number."
+                )
+        except (TypeError, ValueError):
+            errors["acreage"] = "Acreage must be a valid number."
+
+    # Dates are optional but, when supplied, must use YYYY-MM-DD.
+    def validate_date(field_name):
+        raw_value = payload.get(field_name)
+
+        if raw_value is None or raw_value == "":
+            return None
+
+        if not isinstance(raw_value, str):
+            errors[field_name] = (
+                "Date must be a string in YYYY-MM-DD format."
+            )
+            return None
+
+        value = raw_value.strip()
+
+        if not value:
+            return None
+
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d").date()
+
+            if parsed.isoformat() != value:
+                raise ValueError("Date is not in canonical format.")
+
+            return value
+
+        except ValueError:
+            errors[field_name] = (
+                "Enter a valid date in YYYY-MM-DD format."
+            )
+            return None
+
+    planting_date = validate_date("planting_date")
+    expected_harvest_date = validate_date(
+        "expected_harvest_date"
+    )
+
+    if (
+        planting_date
+        and expected_harvest_date
+        and expected_harvest_date < planting_date
+    ):
+        errors["expected_harvest_date"] = (
+            "Expected harvest cannot be before the planting date."
+        )
+
+    # Expected quantity is optional, but cannot be negative.
+    raw_quantity = payload.get("expected_quantity")
+    expected_quantity = None
+
+    if raw_quantity not in (None, ""):
+        if isinstance(raw_quantity, bool):
+            errors["expected_quantity"] = (
+                "Expected quantity must be a non-negative number."
+            )
+        else:
+            try:
+                expected_quantity = float(raw_quantity)
+
+                if (
+                    not math.isfinite(expected_quantity)
+                    or expected_quantity < 0
+                ):
+                    errors["expected_quantity"] = (
+                        "Expected quantity must be a non-negative "
+                        "finite number."
+                    )
+
+            except (TypeError, ValueError):
+                errors["expected_quantity"] = (
+                    "Expected quantity must be a valid number."
+                )
+
+    # Units are optional because some crops may not have a forecast yet.
+    raw_unit = payload.get("quantity_unit", "")
+
+    if raw_unit is None:
+        raw_unit = ""
+
+    if not isinstance(raw_unit, str) or len(raw_unit.strip()) > 30:
+        errors["quantity_unit"] = (
+            "Quantity unit must be text of at most 30 characters."
+        )
+        quantity_unit = ""
+    else:
+        quantity_unit = raw_unit.strip()
+
+    return {
+        "name": name,
+        "acreage": acreage,
+        "planting_date": planting_date,
+        "expected_harvest_date": expected_harvest_date,
+        "expected_quantity": expected_quantity,
+        "quantity_unit": quantity_unit,
     }, errors

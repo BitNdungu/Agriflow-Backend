@@ -7,7 +7,11 @@ from flask import Flask, jsonify, request
 from database import get_db, init_app as init_database
 from models import Farmer
 from validation import validate_farmer_payload
-
+from models import Crop, Farmer
+from validation import (
+    validate_crop_payload,
+    validate_farmer_payload,
+)
 
 COUNTY_NAME = "Murang'a County"
 
@@ -200,6 +204,232 @@ def create_app(test_config=None):
             "farmer": Farmer.from_row(updated).to_dict(),
         }), 200
 
+    @app.post("/api/farmers/<int:farmer_id>/crops")
+    def create_crop(farmer_id):
+        db = get_db()
+
+        farmer = db.execute(
+            "SELECT id FROM farmers WHERE id = ?",
+            (farmer_id,),
+        ).fetchone()
+
+        if farmer is None:
+            return jsonify({
+                "error": "Farmer not found.",
+            }), 404
+
+        if not request.is_json:
+            return jsonify({
+                "error": "Content-Type must be application/json",
+            }), 415
+
+        payload = request.get_json(silent=True)
+
+        if not isinstance(payload, dict):
+            return jsonify({
+                "error": "The request body must be a JSON object.",
+            }), 400
+
+        data, errors = validate_crop_payload(payload)
+
+        if errors:
+            return jsonify({
+                "error": "Validation failed.",
+                "fields": errors,
+            }), 400
+
+        now = (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+        cursor = db.execute(
+            """
+            INSERT INTO crops (
+                farmer_id,
+                name,
+                acreage,
+                planting_date,
+                expected_harvest_date,
+                expected_quantity,
+                quantity_unit,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                farmer_id,
+                data["name"],
+                data["acreage"],
+                data["planting_date"],
+                data["expected_harvest_date"],
+                data["expected_quantity"],
+                data["quantity_unit"],
+                now,
+                now,
+            ),
+        )
+
+        db.commit()
+
+        row = db.execute(
+            "SELECT * FROM crops WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+
+        return jsonify({
+            "crop": Crop.from_row(row).to_dict(),
+        }), 201
+
+    @app.get("/api/farmers/<int:farmer_id>/crops")
+    def get_farmer_crops(farmer_id):
+        db = get_db()
+
+        farmer = db.execute(
+            "SELECT id FROM farmers WHERE id = ?",
+            (farmer_id,),
+        ).fetchone()
+
+        if farmer is None:
+            return jsonify({
+                "error": "Farmer not found.",
+            }), 404
+
+        rows = db.execute(
+            """
+            SELECT *
+            FROM crops
+            WHERE farmer_id = ?
+            ORDER BY id DESC
+            """,
+            (farmer_id,),
+        ).fetchall()
+
+        crops = [
+            Crop.from_row(row).to_dict()
+            for row in rows
+        ]
+
+        return jsonify({
+            "farmer_id": farmer_id,
+            "count": len(crops),
+            "crops": crops,
+        }), 200
+
+    @app.put(
+        "/api/farmers/<int:farmer_id>/crops/<int:crop_id>"
+    )
+    def update_crop(farmer_id, crop_id):
+        db = get_db()
+
+        row = db.execute(
+            """
+            SELECT *
+            FROM crops
+            WHERE id = ? AND farmer_id = ?
+            """,
+            (crop_id, farmer_id),
+        ).fetchone()
+
+        if row is None:
+            return jsonify({
+                "error": "Crop not found for this farmer.",
+            }), 404
+
+        if not request.is_json:
+            return jsonify({
+                "error": "Content-Type must be application/json",
+            }), 415
+
+        payload = request.get_json(silent=True)
+
+        if not isinstance(payload, dict):
+            return jsonify({
+                "error": "The request body must be a JSON object.",
+            }), 400
+
+        data, errors = validate_crop_payload(payload)
+
+        if errors:
+            return jsonify({
+                "error": "Validation failed.",
+                "fields": errors,
+            }), 400
+
+        updated_at = (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+        db.execute(
+            """
+            UPDATE crops
+            SET
+                name = ?,
+                acreage = ?,
+                planting_date = ?,
+                expected_harvest_date = ?,
+                expected_quantity = ?,
+                quantity_unit = ?,
+                updated_at = ?
+            WHERE id = ? AND farmer_id = ?
+            """,
+            (
+                data["name"],
+                data["acreage"],
+                data["planting_date"],
+                data["expected_harvest_date"],
+                data["expected_quantity"],
+                data["quantity_unit"],
+                updated_at,
+                crop_id,
+                farmer_id,
+            ),
+        )
+
+        db.commit()
+
+        updated = db.execute(
+            "SELECT * FROM crops WHERE id = ?",
+            (crop_id,),
+        ).fetchone()
+
+        return jsonify({
+            "crop": Crop.from_row(updated).to_dict(),
+        }), 200
+
+    @app.delete(
+        "/api/farmers/<int:farmer_id>/crops/<int:crop_id>"
+    )
+    def delete_crop(farmer_id, crop_id):
+        db = get_db()
+
+        cursor = db.execute(
+            """
+            DELETE FROM crops
+            WHERE id = ? AND farmer_id = ?
+            """,
+            (crop_id, farmer_id),
+        )
+
+        if cursor.rowcount == 0:
+            return jsonify({
+                "error": "Crop not found for this farmer.",
+            }), 404
+
+        db.commit()
+
+        return jsonify({
+            "message": "Crop deleted successfully.",
+            "crop_id": crop_id,
+            "farmer_id": farmer_id,
+        }), 200
+
     return app
 
 
@@ -213,3 +443,5 @@ if __name__ == "__main__":
         port=5050,
         debug=True,
     )
+
+  

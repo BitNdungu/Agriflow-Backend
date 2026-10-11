@@ -5,6 +5,7 @@ import sqlite3
 from flask import current_app, g
 
 
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS farmers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,7 +21,35 @@ CREATE TABLE IF NOT EXISTS farmers (
     CHECK (length(trim(full_name)) BETWEEN 1 AND 120),
     CHECK (farm_size_acres IS NULL OR farm_size_acres > 0)
 );
+
+CREATE TABLE IF NOT EXISTS crops (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    farmer_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    acreage REAL NOT NULL,
+    planting_date TEXT,
+    expected_harvest_date TEXT,
+    expected_quantity REAL,
+    quantity_unit TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+
+    CHECK (length(trim(name)) BETWEEN 1 AND 120),
+    CHECK (acreage > 0),
+    CHECK (
+        expected_quantity IS NULL
+        OR expected_quantity >= 0
+    ),
+
+    FOREIGN KEY (farmer_id)
+        REFERENCES farmers(id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_crops_farmer_id
+ON crops(farmer_id);
 """
+
 
 
 def get_db():
