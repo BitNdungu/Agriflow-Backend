@@ -276,3 +276,90 @@ def validate_crop_payload(payload):
         "expected_quantity": expected_quantity,
         "quantity_unit": quantity_unit,
     }, errors
+
+VALID_PROBLEM_CATEGORIES = {
+    "Pest infestation",
+    "Suspected crop disease",
+    "Weather damage",
+    "Water or irrigation problem",
+    "Soil or nutrient issue",
+    "Physical crop damage",
+    "Other",
+}
+
+
+def validate_problem_report_payload(payload):
+    """Validate and normalize a farm problem report."""
+    errors = {}
+
+    # Problem category is required and must be supported.
+    raw_category = payload.get("category")
+
+    if not isinstance(raw_category, str) or not raw_category.strip():
+        errors["category"] = "A problem category is required."
+        category = ""
+    else:
+        category = raw_category.strip()
+
+        if category not in VALID_PROBLEM_CATEGORIES:
+            errors["category"] = "Choose a supported problem category."
+
+    # Crop affected is optional.
+    raw_crop = payload.get("crop_affected", "")
+
+    if raw_crop is None:
+        raw_crop = ""
+
+    if not isinstance(raw_crop, str) or len(raw_crop.strip()) > 120:
+        errors["crop_affected"] = (
+            "Affected crop must be text of at most 120 characters."
+        )
+        crop_affected = ""
+    else:
+        crop_affected = raw_crop.strip()
+
+    # Sub-county must match a known Murang'a County sub-county.
+    raw_subcounty = payload.get("subcounty")
+
+    if not isinstance(raw_subcounty, str) or not raw_subcounty.strip():
+        errors["subcounty"] = "A sub-county is required."
+        subcounty = ""
+    else:
+        subcounty = raw_subcounty.strip()
+
+        if subcounty not in VALID_SUBCOUNTIES:
+            errors["subcounty"] = "Choose a valid Murang'a County sub-county."
+
+    # Ward is optional.
+    raw_ward = payload.get("ward", "")
+
+    if raw_ward is None:
+        raw_ward = ""
+
+    if not isinstance(raw_ward, str) or len(raw_ward.strip()) > 100:
+        errors["ward"] = "Ward must be text of at most 100 characters."
+        ward = ""
+    else:
+        ward = raw_ward.strip()
+
+    # A useful description is required.
+    raw_description = payload.get("description")
+
+    if not isinstance(raw_description, str) or not raw_description.strip():
+        errors["description"] = "A problem description is required."
+        description = ""
+    else:
+        description = raw_description.strip()
+
+        if len(description) > 2000:
+            errors["description"] = (
+                "Description must be at most 2000 characters."
+            )
+
+    return {
+        "category": category,
+        "crop_affected": crop_affected,
+        "subcounty": subcounty,
+        "ward": ward,
+        "description": description,
+    }, errors

@@ -48,6 +48,44 @@ CREATE TABLE IF NOT EXISTS crops (
 
 CREATE INDEX IF NOT EXISTS idx_crops_farmer_id
 ON crops(farmer_id);
+CREATE TABLE IF NOT EXISTS problem_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    farmer_id INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    crop_affected TEXT NOT NULL DEFAULT '',
+    subcounty TEXT NOT NULL,
+    ward TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'submitted',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+
+    CHECK (
+        category IN (
+            'Pest infestation',
+            'Suspected crop disease',
+            'Weather damage',
+            'Water or irrigation problem',
+            'Soil or nutrient issue',
+            'Physical crop damage',
+            'Other'
+        )
+    ),
+    CHECK (length(trim(subcounty)) BETWEEN 1 AND 80),
+    CHECK (length(trim(ward)) <= 100),
+    CHECK (length(trim(crop_affected)) <= 120),
+    CHECK (length(trim(description)) BETWEEN 1 AND 2000),
+    CHECK (
+        status IN ('submitted', 'under_review', 'resolved')
+    ),
+
+    FOREIGN KEY (farmer_id)
+        REFERENCES farmers(id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_problem_reports_farmer_id
+ON problem_reports(farmer_id);
 """
 
 

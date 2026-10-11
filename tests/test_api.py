@@ -538,3 +538,163 @@ def test_delete_missing_crop_returns_404(client):
     )
 
     assert response.status_code == 404
+
+def valid_problem_report_payload():
+    return {
+        "category": "Pest infestation",
+        "crop_affected": "Tomatoes",
+        "subcounty": "Kiharu",
+        "ward": "Township",
+        "description": "White insects are damaging the tomato leaves.",
+    }
+
+
+def register_test_problem_report(client, farmer_id):
+    response = client.post(
+        f"/api/farmers/{farmer_id}/problem-reports",
+        json=valid_problem_report_payload(),
+    )
+
+    assert response.status_code == 201
+    return response.get_json()["report"]
+
+
+def test_create_problem_report(client):
+    farmer = register_test_farmer(client)
+
+    response = client.post(
+        f"/api/farmers/{farmer['id']}/problem-reports",
+        json=valid_problem_report_payload(),
+    )
+
+    assert response.status_code == 201
+
+    report = response.get_json()["report"]
+
+    assert report["id"] > 0
+    assert report["farmer_id"] == farmer["id"]
+    assert report["category"] == "Pest infestation"
+    assert report["crop_affected"] == "Tomatoes"
+    assert report["subcounty"] == "Kiharu"
+    assert report["ward"] == "Township"
+    assert report["description"] == (
+        "White insects are damaging the tomato leaves."
+    )
+    assert report["status"] == "submitted"
+    assert report["created_at"] == report["updated_at"]
+
+
+def test_list_farmer_problem_reports(client):
+    farmer = register_test_farmer(client)
+    report = register_test_problem_report(client, farmer["id"])
+
+    response = client.get(
+        f"/api/farmers/{farmer['id']}/problem-reports"
+    )
+
+    assert response.status_code == 200
+
+    data = response.get_json()
+
+    assert data["farmer_id"] == farmer["id"]
+    assert data["count"] == 1
+    assert data["reports"][0] == report
+
+
+def test_list_farmer_with_no_problem_reports(client):
+    farmer = register_test_farmer(client)
+
+    response = client.get(
+        f"/api/farmers/{farmer['id']}/problem-reports"
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["count"] == 0
+    assert response.get_json()["reports"] == []
+
+
+def test_cannot_create_problem_report_for_missing_farmer(client):
+    response = client.post(
+        "/api/farmers/9999/problem-reports",
+        json=valid_problem_report_payload(),
+    )
+
+    assert response.status_code == 404
+
+
+def test_create_problem_report_rejects_invalid_category(client):
+    farmer = register_test_farmer(client)
+    payload = valid_problem_report_payload()
+    payload["category"] = "Unrecognized problem"
+
+    response = client.post(
+        f"/api/farmers/{farmer['id']}/problem-reports",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert "category" in response.get_json()["fields"]
+
+
+def test_create_problem_report_rejects_blank_description(client):
+    farmer = register_test_farmer(client)
+    payload = valid_problem_report_payload()
+    payload["description"] = "   "
+
+    response = client.post(
+        f"/api/farmers/{farmer['id']}/problem-reports",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert "description" in response.get_json()["fields"]
+
+
+def test_create_problem_report_rejects_non_json_request(client):
+    farmer = register_test_farmer(client)
+
+    response = client.post(
+        f"/api/farmers/{farmer['id']}/problem-reports",
+        data="not JSON",
+        content_type="text/plain",
+    )
+
+    assert response.status_code == 415
+
+
+def test_get_problem_report(client):
+    farmer = register_test_farmer(client)
+    report = register_test_problem_report(client, farmer["id"])
+
+    response = client.get(
+        f"/api/farmers/{farmer['id']}/problem-reports/{report['id']}"
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["report"] == report
+
+
+def test_get_missing_problem_report_returns_404(client):
+    farmer = register_test_farmer(client)
+
+    response = client.get(
+        f"/api/farmers/{farmer['id']}/problem-reports/9999"
+    )
+
+    assert response.status_code == 404
+
+
+def test_problem_report_cannot_be_retrieved_under_another_farmer(client):
+    first_farmer = register_test_farmer(client)
+    second_farmer = register_test_farmer(client)
+
+    report = register_test_problem_report(
+        client,
+        first_farmer["id"],
+    )
+
+    response = client.get(
+        f"/api/farmers/{second_farmer['id']}/problem-reports/{report['id']}"
+    )
+
+    assert response.status_code == 404

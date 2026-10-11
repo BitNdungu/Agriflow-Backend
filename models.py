@@ -89,3 +89,47 @@ class Crop:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+@dataclass(frozen=True)
+class ProblemReport:
+    id: int
+    farmer_id: int
+    category: str
+    crop_affected: str
+    subcounty: str
+    ward: str
+    description: str
+    status: str
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "ProblemReport":
+        """Convert a SQLite row into a ProblemReport model."""
+        return cls(
+            id=row["id"],
+            farmer_id=row["farmer_id"],
+            category=row["category"],
+            crop_affected=row["crop_affected"],
+            subcounty=row["subcounty"],
+            ward=row["ward"],
+            description=row["description"],
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def to_dict(self) -> dict:
+        """Convert the model to a JSON-friendly dictionary."""
+        return {
+            "id": self.id,
+            "farmer_id": self.farmer_id,
+            "category": self.category,
+            "crop_affected": self.crop_affected,
+            "subcounty": self.subcounty,
+            "ward": self.ward,
+            "description": self.description,
+            "status": self.status,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
