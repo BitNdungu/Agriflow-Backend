@@ -86,6 +86,25 @@ CREATE TABLE IF NOT EXISTS problem_reports (
 
 CREATE INDEX IF NOT EXISTS idx_problem_reports_farmer_id
 ON problem_reports(farmer_id);
+
+CREATE TABLE IF NOT EXISTS problem_report_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER NOT NULL UNIQUE,
+    stored_filename TEXT NOT NULL UNIQUE,
+    media_type TEXT NOT NULL DEFAULT 'image/jpeg',
+    size_bytes INTEGER NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    uploaded_at TEXT NOT NULL,
+
+    CHECK (size_bytes > 0),
+    CHECK (width > 0 AND height > 0),
+
+    FOREIGN KEY (report_id)
+        REFERENCES problem_reports(id)
+        ON DELETE CASCADE
+);
+
 """
 
 

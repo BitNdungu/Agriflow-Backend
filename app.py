@@ -1,8 +1,17 @@
 
 import os
+import uuid
+import warnings
 from datetime import datetime, timezone
+from io import BytesIO
 
-from flask import Flask, jsonify, request
+from flask import (
+    Flask,
+    jsonify,
+    request,
+    send_from_directory,
+)
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from database import get_db, init_app as init_database
 from models import Crop, Farmer, ProblemReport
@@ -14,15 +23,117 @@ from validation import (
 
 COUNTY_NAME = "Murang'a County"
 
+SUPPORTED_PHOTO_FORMATS = {"JPEG", "PNG", "WEBP"}
+
+MAX_PROBLEM_PHOTO_BYTES = 7 * 1024 * 1024
+
+MAX_PROBLEM_PHOTO_PIXELS = 25_000_000
+
+
+class InvalidProblemPhoto(ValueError):
+    """Raised when an uploaded image cannot be safely accepted."""
+
+
+def normalize_problem_photo(raw_bytes):
+    """Validate an image and convert it into a clean JPEG."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter(
+                "error",
+                Image.DecompressionBombWarning,
+            )
+
+            # Inspect the image format and dimensions before decoding.
+            with Image.open(BytesIO(raw_bytes)) as source:
+                if source.format not in SUPPORTED_PHOTO_FORMATS:
+                    raise InvalidProblemPhoto(
+                        "Upload a JPEG, PNG, or WebP image."
+                    )
+
+                if source.width * source.height > MAX_PROBLEM_PHOTO_PIXELS:
+                    raise InvalidProblemPhoto(
+                        "Image dimensions exceed the allowed limit."
+                    )
+
+                if getattr(source, "is_animated", False):
+                    raise InvalidProblemPhoto(
+                        "Animated images are not supported."
+                    )
+
+                source.verify()
+
+            # Reopen the verified image for processing.
+            with Image.open(BytesIO(raw_bytes)) as source:
+                source = ImageOps.exif_transpose(source)
+                source.load()
+
+                # Flatten transparency onto a white background.
+                if (
+                    source.mode in ("RGBA", "LA")
+                    or "transparency" in source.info
+                ):
+                    rgba = source.convert("RGBA")
+                    normalized = Image.new(
+                        "RGB",
+                        rgba.size,
+                        (255, 255, 255),
+                    )
+                    normalized.paste(
+                        rgba,
+                        mask=rgba.getchannel("A"),
+                    )
+                else:
+                    normalized = source.convert("RGB")
+
+                # Keep display images at a practical resolution.
+                normalized.thumbnail(
+                    (2400, 2400),
+                    Image.Resampling.LANCZOS,
+                )
+
+                width, height = normalized.size
+
+                output = BytesIO()
+                normalized.save(
+                    output,
+                    format="JPEG",
+                    quality=85,
+                    optimize=True,
+                )
+
+                return output.getvalue(), width, height
+
+    except InvalidProblemPhoto:
+        raise
+    except (
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError,
+        EOFError,
+        ValueError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ) as exc:
+        raise InvalidProblemPhoto(
+            "The uploaded file is not a valid supported image."
+        ) from exc
+
 
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
 
+    
     app.config.from_mapping(
         DATABASE=os.path.join(
             app.instance_path,
             "agriflow.sqlite3",
-        )
+        ),
+        MAX_CONTENT_LENGTH=8 * 1024 * 1024,
+        PROBLEM_REPORT_UPLOAD_DIR=os.path.join(
+            app.instance_path,
+            "uploads",
+            "problem_reports",
+        ),
     )
 
     if test_config is not None:
@@ -31,6 +142,12 @@ def create_app(test_config=None):
     os.makedirs(app.instance_path, exist_ok=True)
 
     init_database(app)
+    
+    @app.errorhandler(413)
+    def request_too_large(error):
+        return jsonify({
+            "error": "Request exceeds the maximum allowed size.",
+        }), 413
 
     @app.get("/")
     def index():
@@ -578,6 +695,285 @@ def create_app(test_config=None):
         return jsonify({
             "report": ProblemReport.from_row(row).to_dict(),
         }), 200
+    
+    def save_problem_report_photo(
+        farmer_id,
+        report_id,
+        replace_existing=False,
+    ):
+        if request.mimetype != "multipart/form-data":
+            return jsonify({
+                "error": "Content-Type must be multipart/form-data.",
+            }), 415
+
+        uploaded_file = request.files.get("photo")
+
+        if uploaded_file is None or not uploaded_file.filename.strip():
+            return jsonify({
+                "error": "Provide an image in the 'photo' field.",
+            }), 400
+
+        db = get_db()
+
+        report = db.execute(
+            """
+            SELECT id FROM problem_reports
+            WHERE id = ? AND farmer_id = ?
+            """,
+            (report_id, farmer_id),
+        ).fetchone()
+
+        if report is None:
+            return jsonify({
+                "error": "Problem report not found for this farmer.",
+            }), 404
+
+        existing = db.execute(
+            """
+            SELECT * FROM problem_report_photos
+            WHERE report_id = ?
+            """,
+            (report_id,),
+        ).fetchone()
+
+        if existing is not None and not replace_existing:
+            return jsonify({
+                "error": "This report already has a photo. Use PUT to replace it.",
+            }), 409
+
+        if existing is None and replace_existing:
+            return jsonify({
+                "error": "No existing photo was found to replace.",
+            }), 404
+
+        raw_bytes = uploaded_file.stream.read(
+            MAX_PROBLEM_PHOTO_BYTES + 1
+        )
+
+        if not raw_bytes:
+            return jsonify({
+                "error": "The uploaded photo is empty.",
+            }), 400
+
+        if len(raw_bytes) > MAX_PROBLEM_PHOTO_BYTES:
+            return jsonify({
+                "error": "Photo must not exceed 7 MiB.",
+            }), 413
+
+        try:
+            jpeg_bytes, width, height = normalize_problem_photo(
+                raw_bytes
+            )
+        except InvalidProblemPhoto as exc:
+            return jsonify({
+                "error": str(exc),
+            }), 400
+
+        upload_directory = app.config[
+            "PROBLEM_REPORT_UPLOAD_DIR"
+        ]
+        os.makedirs(upload_directory, exist_ok=True)
+
+        stored_filename = f"{uuid.uuid4().hex}.jpg"
+        stored_path = os.path.join(
+            upload_directory,
+            stored_filename,
+        )
+
+        uploaded_at = (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+        try:
+            # Exclusive creation avoids overwriting another file.
+            with open(stored_path, "xb") as destination:
+                destination.write(jpeg_bytes)
+
+            if existing is None:
+                db.execute(
+                    """
+                    INSERT INTO problem_report_photos (
+                        report_id,
+                        stored_filename,
+                        media_type,
+                        size_bytes,
+                        width,
+                        height,
+                        uploaded_at
+                    )
+                    VALUES (?, ?, 'image/jpeg', ?, ?, ?, ?)
+                    """,
+                    (
+                        report_id,
+                        stored_filename,
+                        len(jpeg_bytes),
+                        width,
+                        height,
+                        uploaded_at,
+                    ),
+                )
+            else:
+                db.execute(
+                    """
+                    UPDATE problem_report_photos
+                    SET
+                        stored_filename = ?,
+                        media_type = 'image/jpeg',
+                        size_bytes = ?,
+                        width = ?,
+                        height = ?,
+                        uploaded_at = ?
+                    WHERE report_id = ?
+                    """,
+                    (
+                        stored_filename,
+                        len(jpeg_bytes),
+                        width,
+                        height,
+                        uploaded_at,
+                        report_id,
+                    ),
+                )
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+
+            try:
+                os.remove(stored_path)
+            except OSError:
+                pass
+
+            raise
+
+        # Remove the previous file after the replacement is committed.
+        if existing is not None:
+            old_filename = existing["stored_filename"]
+
+            if (
+                old_filename != stored_filename
+                and os.path.basename(old_filename) == old_filename
+            ):
+                old_path = os.path.join(
+                    upload_directory,
+                    old_filename,
+                )
+
+                try:
+                    os.remove(old_path)
+                except OSError:
+                    pass
+
+        photo = db.execute(
+            """
+            SELECT * FROM problem_report_photos
+            WHERE report_id = ?
+            """,
+            (report_id,),
+        ).fetchone()
+
+        return jsonify({
+            "photo": {
+                "id": photo["id"],
+                "report_id": photo["report_id"],
+                "media_type": photo["media_type"],
+                "size_bytes": photo["size_bytes"],
+                "width": photo["width"],
+                "height": photo["height"],
+                "uploaded_at": photo["uploaded_at"],
+                "url": (
+                    f"/api/farmers/{farmer_id}"
+                    f"/problem-reports/{report_id}/photo"
+                ),
+            },
+        }), 200 if replace_existing else 201
+
+    @app.post(
+        "/api/farmers/<int:farmer_id>/problem-reports/"
+        "<int:report_id>/photo"
+    )
+    def upload_problem_report_photo(farmer_id, report_id):
+        return save_problem_report_photo(
+            farmer_id,
+            report_id,
+            replace_existing=False,
+        )
+
+    @app.put(
+        "/api/farmers/<int:farmer_id>/problem-reports/"
+        "<int:report_id>/photo"
+    )
+    def replace_problem_report_photo(farmer_id, report_id):
+        return save_problem_report_photo(
+            farmer_id,
+            report_id,
+            replace_existing=True,
+        )
+
+    @app.get(
+        "/api/farmers/<int:farmer_id>/problem-reports/"
+        "<int:report_id>/photo"
+    )
+    def get_problem_report_photo(farmer_id, report_id):
+        db = get_db()
+
+        report = db.execute(
+            """
+            SELECT id FROM problem_reports
+            WHERE id = ? AND farmer_id = ?
+            """,
+            (report_id, farmer_id),
+        ).fetchone()
+
+        if report is None:
+            return jsonify({
+                "error": "Problem report not found for this farmer.",
+            }), 404
+
+        photo = db.execute(
+            """
+            SELECT * FROM problem_report_photos
+            WHERE report_id = ?
+            """,
+            (report_id,),
+        ).fetchone()
+
+        if photo is None:
+            return jsonify({
+                "error": "No photo is attached to this report.",
+            }), 404
+
+        filename = photo["stored_filename"]
+
+        # Only serve filenames generated by this application.
+        if os.path.basename(filename) != filename:
+            return jsonify({
+                "error": "Stored photo could not be retrieved.",
+            }), 500
+
+        upload_directory = app.config[
+            "PROBLEM_REPORT_UPLOAD_DIR"
+        ]
+        stored_path = os.path.join(upload_directory, filename)
+
+        if not os.path.isfile(stored_path):
+            return jsonify({
+                "error": "Stored photo file was not found.",
+            }), 404
+
+        return send_from_directory(
+            upload_directory,
+            filename,
+            mimetype=photo["media_type"],
+            as_attachment=False,
+            conditional=True,
+            max_age=0,
+        )
+    
 
     return app
 
