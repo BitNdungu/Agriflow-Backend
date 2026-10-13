@@ -1,4 +1,4 @@
-
+﻿
 import os
 import uuid
 import warnings
@@ -20,6 +20,8 @@ from validation import (
     validate_farmer_payload,
     validate_problem_report_payload,
 )
+
+from county_dashboard import register_county_dashboard
 
 COUNTY_NAME = "Murang'a County"
 
@@ -142,6 +144,8 @@ def create_app(test_config=None):
     os.makedirs(app.instance_path, exist_ok=True)
 
     init_database(app)
+
+    register_county_dashboard(app)
     
     @app.errorhandler(413)
     def request_too_large(error):
@@ -990,3 +994,4 @@ if __name__ == "__main__":
     )
 
   
+

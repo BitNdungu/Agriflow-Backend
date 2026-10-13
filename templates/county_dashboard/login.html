@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#173c2e">
+  <title>{{ page_title }} · MURANG'A AGRIFLOW</title>
+  <link rel="icon" href="{{ url_for('county_dashboard.static', filename='mark.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('county_dashboard.static', filename='dashboard.css') }}">
+</head>
+<body class="login-page">
+  <div class="login-decoration decoration-one"></div><div class="login-decoration decoration-two"></div>
+  <main class="login-layout">
+    <section class="login-story">
+      <a class="brand brand-on-dark" href="{{ url_for('county_dashboard.login') }}"><span class="brand-mark"><img src="{{ url_for('county_dashboard.static', filename='mark.svg') }}" alt=""></span><span class="brand-copy"><strong>AGRIFLOW</strong><small>MURANG'A COUNTY</small></span></a>
+      <div class="story-content">
+        <div class="eyebrow eyebrow-light"><span class="live-dot"></span> COUNTY AGRICULTURE INTELLIGENCE</div>
+        <h1>Local insight.<br><em>Stronger harvests.</em></h1>
+        <p>A workspace for reviewing farmers' reports, seeing evidence from the field, and sharing approved agricultural imagery with the AGRIFLOW app.</p>
+        <div class="story-points"><span><b>01</b> Review incoming reports</span><span><b>02</b> Follow issues by location</span><span><b>03</b> Keep farmer guidance fresh</span></div>
+      </div>
+      <div class="login-story-foot">MURANG'A AGRIFLOW <span>•</span> LOCAL DEMONSTRATION</div>
+    </section>
+    <section class="login-side">
+      <div class="login-card">
+        <div class="login-mobile-brand"><span class="brand-mark"><img src="{{ url_for('county_dashboard.static', filename='mark.svg') }}" alt=""></span><span class="brand-copy"><strong>AGRIFLOW</strong><small>MURANG'A COUNTY</small></span></div>
+        <div class="eyebrow">STAFF ACCESS</div>
+        <h2>Welcome back</h2>
+        <p class="muted">Sign in to open your county workspace.</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-stack">{% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
+        <form method="post" class="login-form">
+          <input type="hidden" name="csrf_token" value="{{ county_csrf_token() }}">
+          <label for="username">Username</label><input id="username" name="username" autocomplete="username" required autofocus placeholder="County staff username">
+          <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password">
+          <button class="button button-primary button-wide" type="submit">Sign in <span aria-hidden="true">→</span></button>
+        </form>
+        <div class="login-note"><span class="lock-mark">⌑</span><span>This prototype is intended for local testing. Do not expose the development server to a public network.</span></div>
+      </div>
+      <div class="login-side-foot">Built for farmer support in Murang'a County.</div>
+    </section>
+  </main>
+</body>
+</html>
